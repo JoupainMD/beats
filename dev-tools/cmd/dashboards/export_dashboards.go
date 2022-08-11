@@ -66,7 +66,8 @@ func main() {
 		user = u.User.Username()
 		pass, _ = u.User.Password()
 	}
-
+	user = "beats"
+	pass = "testing"
 	transport := httpcommon.DefaultHTTPTransportSettings()
 	transport.Timeout = kibanaTimeout
 
@@ -78,7 +79,7 @@ func main() {
 		Path:      u.Path,
 		SpaceID:   *spaceID,
 		Transport: transport,
-	})
+	}, "Beat Development Tools")
 	if err != nil {
 		log.Fatalf("Error while connecting to Kibana: %v", err)
 	}

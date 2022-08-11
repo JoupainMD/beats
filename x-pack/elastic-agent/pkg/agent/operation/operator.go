@@ -135,6 +135,21 @@ func (o *Operator) State() map[string]state.State {
 	return result
 }
 
+// Specs returns all program specifications
+func (o *Operator) Specs() map[string]program.Spec {
+	r := make(map[string]program.Spec)
+
+	o.appsLock.Lock()
+	defer o.appsLock.Unlock()
+
+	for _, app := range o.apps {
+		// use app.Name() instead of the (map) key so we can easy find the "_monitoring" processes
+		r[app.Name()] = app.Spec()
+	}
+
+	return r
+}
+
 // Close stops all programs handled by operator and clears state
 func (o *Operator) Close() error {
 	o.monitor.Close()
@@ -203,9 +218,26 @@ func (o *Operator) Shutdown() {
 		o.logger.Debugf("pipeline installer '%s' done", o.pipelineID)
 	}
 
-	for _, app := range o.apps {
-		app.Shutdown()
+	o.appsLock.Lock()
+	defer o.appsLock.Unlock()
+
+	wg := sync.WaitGroup{}
+	wg.Add(len(o.apps))
+
+	started := time.Now()
+
+	for _, a := range o.apps {
+		go func(a Application) {
+			started := time.Now()
+			a.Shutdown()
+			wg.Done()
+			o.logger.Debugf("took %s to shutdown %s",
+				time.Now().Sub(started), a.Name())
+		}(a)
 	}
+	wg.Wait()
+	o.logger.Debugf("took %s to shutdown %d apps",
+		time.Now().Sub(started), len(o.apps))
 }
 
 // Start starts a new process based on a configuration
@@ -305,9 +337,11 @@ func (o *Operator) getApp(p Descriptor) (Application, error) {
 	var err error
 
 	monitor := o.monitor
+	appName := p.BinaryName()
 	if app.IsSidecar(p) {
 		// make watchers unmonitorable
 		monitor = noop.NewMonitor()
+		appName += "_monitoring"
 	}
 
 	if p.ServicePort() == 0 {
@@ -315,7 +349,7 @@ func (o *Operator) getApp(p Descriptor) (Application, error) {
 		a, err = process.NewApplication(
 			o.bgContext,
 			p.ID(),
-			p.BinaryName(),
+			appName,
 			o.pipelineID,
 			o.config.LoggingConfig.Level.String(),
 			desc,
@@ -331,7 +365,7 @@ func (o *Operator) getApp(p Descriptor) (Application, error) {
 		a, err = service.NewApplication(
 			o.bgContext,
 			p.ID(),
-			p.BinaryName(),
+			appName,
 			o.pipelineID,
 			o.config.LoggingConfig.Level.String(),
 			p.ServicePort(),
